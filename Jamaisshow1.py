@@ -1,3 +1,7 @@
+📁 bot-tren-reality
+   ├── bot.py
+   └── requirements.txt
+
 import Jamaisshow
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
