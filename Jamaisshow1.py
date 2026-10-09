@@ -1,0 +1,162 @@
+import Jamaisshow
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+
+# Configuración básica
+logging.basicConfig(level=logging.INFO)
+TOKEN = "TU_TOKEN_AQUI"  # 8849266755:AAFxYkdW6oHCQ89qinNSxwRcxsyPBWscF4I
+
+# Estado del juego por chat
+# Cada chat tendrá: jugadores, puertas abiertas, y si el tren ya pasó
+juegos = {}
+
+PUERTAS = ["A", "B", "C"]
+
+def nuevo_juego(chat_id):
+    juegos[chat_id] = {
+        "jugadores": {},
+        "puertas_abiertas": random.sample(PUERTAS, 2),  # 2 de 3 se abren
+        "tren_paso": False,
+        "ronda": 1
+    }
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    nuevo_juego(chat_id)
+    await update.message.reply_text(
+        "🎬 **¡Bienvenido al Reality del Tren!**\n\n"
+        "Un tren viene hacia nosotros. Hay 3 puertas: A, B y C.\n"
+        "Solo 2 se abrirán. Quien elija la puerta cerrada... queda fuera.\n\n"
+        "Comandos:\n"
+        "/unirse - Únete a esta ronda\n"
+        "/tren - Anuncia que el tren viene (solo el host)\n"
+        "/elegir A|B|C - Elige tu puerta\n"
+        "/estado - Ver quién sigue vivo"
+    )
+
+
+async def unirse(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+
+    if chat_id not in juegos:
+        nuevo_juego(chat_id)
+
+    juego = juegos[chat_id]
+    if juego["tren_paso"]:
+        await update.message.reply_text("El tren ya pasó. Espera la siguiente ronda.")
+        return
+
+    if user.id in juego["jugadores"]:
+        await update.message.reply_text("Ya estás en el juego.")
+        return
+
+    juego["jugadores"][user.id] = {"nombre": user.first_name, "puerta": None, "vivo": True}
+    await update.message.reply_text(f"✅ {user.first_name} se unió al juego. Jugadores: {len(juego['jugadores'])}")
+
+
+
+async def tren(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    juego = juegos.get(chat_id)
+
+    if not juego or not juego["jugadores"]:
+        await update.message.reply_text("No hay jugadores todavía. Usa /unirse.")
+        return
+
+    if juego["tren_paso"]:
+        await update.message.reply_text("El tren ya pasó. Usa /reiniciar para otra ronda.")
+        return
+
+    juego["tren_paso"] = True
+    await update.message.reply_text(
+        "🚂 **¡EL TREN VIENE!** 🚂\n\n"
+        "Corran y elijan una puerta con /elegir A, B o C.\n"
+        "Tienen poco tiempo..."
+    )
+
+
+async def elegir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    juego = juegos.get(chat_id)
+
+    if not juego or not juego["tren_paso"]:
+        await update.message.reply_text("El tren aún no viene. Espera que alguien use /tren.")
+        return
+
+    if user.id not in juego["jugadores"]:
+        await update.message.reply_text("Primero únete con /unirse.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usa: /elegir A, B o C")
+        return
+
+    puerta = context.args[0].upper()
+    if puerta not in PUERTAS:
+        await update.message.reply_text("Puerta inválida. Elige A, B o C.")
+        return
+
+    jugador = juego["jugadores"][user.id]
+    if jugador["puerta"]:
+        await update.message.reply_text("Ya elegiste puerta.")
+        return
+
+    jugador["puerta"] = puerta
+
+    if puerta in juego["puertas_abiertas"]:
+        await update.message.reply_text(f"🚪 ¡La puerta {puerta} se abrió! ¡{user.first_name} está a salvo! ✅")
+    else:
+        jugador["vivo"] = False
+        await update.message.reply_text(f"🚪 La puerta {puerta} NO se abrió... {user.first_name} queda eliminado. 💀")
+
+    # Ver si todos eligieron
+    todos_eligieron = all(j["puerta"] for j in juego["jugadores"].values())
+    if todos_eligieron:
+        sobrevivientes = [j["nombre"] for j in juego["jugadores"].values() if j["vivo"]]
+        if sobrevivientes:
+            await context.bot.send_message(chat_id, f"🏆 **Ronda {juego['ronda']} terminada.** Sobrevivientes: {', '.join(sobrevivientes)}")
+        else:
+            await context.bot.send_message(chat_id, "💀 Nadie sobrevivió...")
+        juego["ronda"] += 1
+
+
+async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    juego = juegos.get(chat_id,
+
+    if not juego or not juego["jugadores"]:
+        await update.message.reply_text("No hay juego activo. Usa /start.")
+        return
+
+    lineas = []
+    for j in juego["jugadores"].values():
+        estado_vida = "✅ vivo" if j["vivo"] else "💀 eliminado"
+        puerta_estado = f" -> puerta {j['puerta']}" if j["puerta"] else ""
+        lineas.append(f"• {j['nombre']}: {estado_vida}{puerta_estado}")
+    await update.message.reply_text("**Estado del juego:**\n" + "\n".join(lineas))
+
+
+async def reiniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    nuevo_juego(chat_id)
+    await update.message.reply_text("🔄 Nueva ronda iniciada. Los nuevos jugadores usan /unirse.")
+
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("unirse", unirse))
+    app.add_handler(CommandHandler("tren", tren))
+    app.add_handler(CommandHandler("elegir", elegir))
+    app.add_handler(CommandHandler("estado", estado))
+    app.add_handler(CommandHandler("reiniciar", reiniciar))
+    print("Bot corriendo...")
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
