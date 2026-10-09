@@ -9,7 +9,7 @@ TOKEN = "TU_TOKEN_AQUI"  # 8849266755:AAFxYkdW6oHCQ89qinNSxwRcxsyPBWscF4I
 
 # Estado del juego por chat
 # Cada chat tendrá: jugadores, puertas abiertas, y si el tren ya pasó
-juegos = {}
+juegos = { 1 }
 
 PUERTAS = ["A", "B", "C"]
 
